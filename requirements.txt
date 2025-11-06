@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+praw
+vaderSentiment
+sqlalchemy
+pydantic
+python-dotenv
+apscheduler
