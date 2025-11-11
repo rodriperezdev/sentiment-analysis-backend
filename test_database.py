@@ -39,18 +39,18 @@ def test_save():
         saved = db.query(Post).filter(Post.id == 'test_123').first()
         
         if saved:
-            print("✅ Database write test: SUCCESS")
+            print("[OK] Database write test: SUCCESS")
             print(f"   Saved test post: {saved.title}")
             
             # Clean up test post
             db.delete(saved)
             db.commit()
-            print("✅ Cleaned up test post")
+            print("[OK] Cleaned up test post")
         else:
-            print("❌ Database write test: FAILED - Post not found after save")
+            print("[ERROR] Database write test: FAILED - Post not found after save")
         
     except Exception as e:
-        print(f"❌ Database write test: FAILED")
+        print(f"[ERROR] Database write test: FAILED")
         print(f"   Error: {e}")
         db.rollback()
     
@@ -58,9 +58,10 @@ def test_save():
         db.close()
 
 if __name__ == "__main__":
-    print("\n🧪 Testing database write capability...\n")
+    print("\nTesting database write capability...\n")
     test_save()
     print()
+
 
 
 

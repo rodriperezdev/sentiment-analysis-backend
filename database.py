@@ -166,13 +166,13 @@ def save_posts(posts_data: list):
             saved_count += 1
         
         db.commit()
-        print(f"✅ Saved {saved_count} new items to database")
+        print(f"[OK] Saved {saved_count} new items to database")
         if skipped_count > 0:
-            print(f"⏭️  Skipped {skipped_count} duplicates")
+            print(f"[SKIP] Skipped {skipped_count} duplicates")
     
     except Exception as e:
         db.rollback()
-        print(f"❌ Error saving posts: {e}")
+        print(f"[ERROR] Error saving posts: {e}")
     
     finally:
         db.close()

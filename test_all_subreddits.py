@@ -40,9 +40,9 @@ if posts:
     
     # Save to database
     save_posts(posts)
-    print(f"\n✓ Saved {len(posts)} posts to database!")
+    print(f"\n[OK] Saved {len(posts)} posts to database!")
 else:
-    print("\n⚠️ No posts collected from any subreddit")
+    print("\n[WARNING] No posts collected from any subreddit")
     print("\nThis could mean:")
     print("  1. Very quiet day politically")
     print("  2. Keywords might be too restrictive")

@@ -12,28 +12,28 @@ import time
 
 def debug_backfill():
     print("\n" + "="*60)
-    print("🐛 DEBUG BACKFILL")
+    print("DEBUG BACKFILL")
     print("="*60)
     
     # Step 1: Initialize database
-    print("\n1️⃣ Initializing database...")
+    print("\n1. Initializing database...")
     init_db()
-    print("   ✅ Database initialized")
+    print("   [OK] Database initialized")
     
     # Step 2: Check current count
     db = SessionLocal()
     current_count = db.query(Post).count()
     db.close()
-    print(f"\n2️⃣ Current posts in database: {current_count}")
+    print(f"\n2. Current posts in database: {current_count}")
     
     # Step 3: Initialize collector
-    print("\n3️⃣ Initializing Reddit collector...")
+    print("\n3. Initializing Reddit collector...")
     collector = RedditCollector()
-    print(f"   ✅ Monitoring: {', '.join(['r/'+s for s in collector.subreddits])}")
-    print(f"   ✅ Political keywords: {len(collector.political_keywords)} keywords")
+    print(f"   [OK] Monitoring: {', '.join(['r/'+s for s in collector.subreddits])}")
+    print(f"   [OK] Political keywords: {len(collector.political_keywords)} keywords")
     
     # Step 4: Try to collect just from ONE subreddit
-    print("\n4️⃣ Testing collection from r/argentina (top 50 from month)...")
+    print("\n4. Testing collection from r/argentina (top 50 from month)...")
     try:
         reddit_sub = collector.reddit.subreddit('argentina')
         test_items = []
@@ -68,25 +68,25 @@ def debug_backfill():
                 
                 print(f"   ✓ Found political post: {submission.title[:50]}...")
         
-        print(f"\n   ✅ Checked {checked} posts, found {len(test_items)} political posts")
+        print(f"\n   [OK] Checked {checked} posts, found {len(test_items)} political posts")
         
         if len(test_items) == 0:
-            print("\n❌ NO POLITICAL POSTS FOUND!")
+            print("\n[ERROR] NO POLITICAL POSTS FOUND!")
             print("   The filter might be too strict or subreddit has no political content.")
             return
         
         # Step 5: Try to save them
-        print(f"\n5️⃣ Attempting to save {len(test_items)} posts to database...")
+        print(f"\n5. Attempting to save {len(test_items)} posts to database...")
         
         try:
             save_posts(test_items)
-            print("   ✅ Save function completed")
+            print("   [OK] Save function completed")
         except Exception as save_error:
-            print(f"   ❌ Save failed: {save_error}")
+            print(f"   [ERROR] Save failed: {save_error}")
             return
         
         # Step 6: Verify they're actually in the database
-        print(f"\n6️⃣ Verifying posts were saved...")
+        print(f"\n6. Verifying posts were saved...")
         db = SessionLocal()
         new_count = db.query(Post).count()
         
@@ -101,26 +101,27 @@ def debug_backfill():
         print(f"   Actual increase: {new_count - current_count}")
         
         if found_post:
-            print(f"   ✅ Found test post in database: {found_post.title[:50]}...")
+            print(f"   [OK] Found test post in database: {found_post.title[:50]}...")
         else:
-            print(f"   ❌ Test post NOT found in database!")
+            print(f"   [ERROR] Test post NOT found in database!")
             print(f"   Looking for ID: {first_post_id}")
         
         if new_count > current_count:
-            print(f"\n✅ SUCCESS! Database was updated.")
+            print(f"\n[OK] SUCCESS! Database was updated.")
             print(f"   You can now run the full backfill.")
         else:
-            print(f"\n❌ PROBLEM! Database was NOT updated.")
+            print(f"\n[ERROR] PROBLEM! Database was NOT updated.")
             print(f"   Posts were collected but not saved to database.")
             
     except Exception as e:
-        print(f"\n❌ Error during test: {e}")
+        print(f"\n[ERROR] Error during test: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
     debug_backfill()
     print("\n" + "="*60 + "\n")
+
 
 
 

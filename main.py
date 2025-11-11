@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
+from contextlib import asynccontextmanager
 import uvicorn
 
 from database import get_db, Post, DailySummary, Topic, init_db, save_posts
@@ -12,10 +13,37 @@ from sentiment_analyzer import ArgentineSentimentAnalyzer
 from scheduler import DataCollectionScheduler
 from reddit_collector import RedditCollector
 
+# Initialize analyzer and collector
+analyzer = ArgentineSentimentAnalyzer()
+collector = RedditCollector()
+
+# Initialize scheduler (will run in background)
+scheduler = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown"""
+    # Startup
+    init_db()
+    
+    global scheduler
+    scheduler = DataCollectionScheduler()
+    scheduler.start()
+    print("✓ Database initialized")
+    print("✓ Scheduler started")
+    
+    yield
+    
+    # Shutdown
+    if scheduler:
+        scheduler.stop()
+    print("✓ Scheduler stopped")
+
 app = FastAPI(
     title="Argentine Election Sentiment API",
     description="Real-time sentiment analysis of Argentine political discussions",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware
@@ -26,31 +54,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize analyzer and collector
-analyzer = ArgentineSentimentAnalyzer()
-collector = RedditCollector()
-
-# Initialize scheduler (will run in background)
-scheduler = None
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and start scheduler on startup"""
-    init_db()
-    
-    global scheduler
-    scheduler = DataCollectionScheduler()
-    scheduler.start()
-    print("✓ Database initialized")
-    print("✓ Scheduler started")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Stop scheduler on shutdown"""
-    if scheduler:
-        scheduler.stop()
-    print("✓ Scheduler stopped")
 
 # Response models
 class SentimentData(BaseModel):

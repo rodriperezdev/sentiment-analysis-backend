@@ -2,7 +2,7 @@
 Enhanced Historical Backfill - Includes Comments for Richer Sentiment Analysis
 This collects both posts AND their top comments for more comprehensive analysis.
 
-⚠️ Warning: This takes 3-5x longer than post-only collection due to Reddit API limits.
+[WARNING] This takes 3-5x longer than post-only collection due to Reddit API limits.
 
 Usage:
     python backfill_with_comments.py
@@ -28,17 +28,17 @@ def backfill_with_comments(comments_per_post: int = 10):
     
     oldest_post = db.query(Post).order_by(Post.created_utc.asc()).first()
     if oldest_post:
-        print(f"📊 Current oldest post: {oldest_post.created_utc}")
+        print(f"Current oldest post: {oldest_post.created_utc}")
     
     db.close()
     
     print("\n" + "="*60)
-    print("🔄 ENHANCED BACKFILL - POSTS + COMMENTS")
+    print("ENHANCED BACKFILL - POSTS + COMMENTS")
     print("="*60)
     print(f"Will collect posts AND top {comments_per_post} comments from each post")
-    print(f"⚠️  This takes longer but gives MUCH richer sentiment data!\n")
+    print(f"[WARNING] This takes longer but gives MUCH richer sentiment data!\n")
     
-    print(f"📍 Monitoring subreddits: {', '.join(['r/'+s for s in collector.subreddits])}\n")
+    print(f"Monitoring subreddits: {', '.join(['r/'+s for s in collector.subreddits])}\n")
     
     all_collected_items = []  # Both posts and comments
     successful_subreddits = set()
@@ -52,12 +52,12 @@ def backfill_with_comments(comments_per_post: int = 10):
     ]
     
     for time_filter, limit, description in time_periods:
-        print(f"\n📅 {description}")
+        print(f"\n{description}")
         print("-" * 60)
         
         for subreddit in collector.subreddits:
             try:
-                print(f"  📍 r/{subreddit} ({time_filter})...")
+                print(f"  r/{subreddit} ({time_filter})...")
                 
                 reddit_sub = collector.reddit.subreddit(subreddit)
                 post_ids = set()
@@ -158,7 +158,7 @@ def backfill_with_comments(comments_per_post: int = 10):
                     # Small delay to respect rate limits
                     time.sleep(0.5)
                 
-                print(f"  ✅ r/{subreddit}: {sub_posts} posts + {sub_comments} comments")
+                print(f"  [OK] r/{subreddit}: {sub_posts} posts + {sub_comments} comments")
                 posts_collected += sub_posts
                 comments_collected += sub_comments
                 successful_subreddits.add(subreddit)
@@ -167,12 +167,12 @@ def backfill_with_comments(comments_per_post: int = 10):
                 time.sleep(2)
                 
             except Exception as e:
-                print(f"  ❌ Error: {e}")
-                print(f"  ⏭️  Skipping r/{subreddit}...")
+                print(f"  [ERROR] Error: {e}")
+                print(f"  [SKIP] Skipping r/{subreddit}...")
                 continue
     
     # Save everything to database
-    print(f"\n💾 Saving {len(all_collected_items)} items to database...")
+    print(f"\nSaving {len(all_collected_items)} items to database...")
     save_posts(all_collected_items)
     
     if all_collected_items:
@@ -180,18 +180,18 @@ def backfill_with_comments(comments_per_post: int = 10):
         oldest = min(dates)
         newest = max(dates)
         
-        print(f"\n📊 ENHANCED BACKFILL COMPLETE!")
+        print(f"\nENHANCED BACKFILL COMPLETE!")
         print("="*60)
-        print(f"✅ Total items: {len(all_collected_items)}")
-        print(f"   📝 Posts: {posts_collected}")
-        print(f"   💬 Comments: {comments_collected}")
-        print(f"   📊 Ratio: {comments_collected/max(posts_collected,1):.1f} comments per post")
-        print(f"📍 Successful subreddits: {', '.join(['r/'+s for s in sorted(successful_subreddits)])}")
-        print(f"📅 Date range: {oldest.strftime('%Y-%m-%d')} to {newest.strftime('%Y-%m-%d')}")
+        print(f"[OK] Total items: {len(all_collected_items)}")
+        print(f"   Posts: {posts_collected}")
+        print(f"   Comments: {comments_collected}")
+        print(f"   Ratio: {comments_collected/max(posts_collected,1):.1f} comments per post")
+        print(f"Successful subreddits: {', '.join(['r/'+s for s in sorted(successful_subreddits)])}")
+        print(f"Date range: {oldest.strftime('%Y-%m-%d')} to {newest.strftime('%Y-%m-%d')}")
         
         days = (newest - oldest).days
-        print(f"⏱️  Span: {days} days ({days/365:.1f} years)")
-        print(f"📊 Density: {len(all_collected_items)/max(days,1):.2f} items/day")
+        print(f"Span: {days} days ({days/365:.1f} years)")
+        print(f"Density: {len(all_collected_items)/max(days,1):.2f} items/day")
         
         # Sentiment breakdown
         sentiments = [item['sentiment'] for item in all_collected_items]
@@ -199,19 +199,19 @@ def backfill_with_comments(comments_per_post: int = 10):
         neg = sentiments.count('negative')
         neu = sentiments.count('neutral')
         
-        print(f"\n📈 Overall Sentiment:")
-        print(f"   😊 Positive: {pos} ({pos/len(all_collected_items)*100:.1f}%)")
-        print(f"   😠 Negative: {neg} ({neg/len(all_collected_items)*100:.1f}%)")
-        print(f"   😐 Neutral: {neu} ({neu/len(all_collected_items)*100:.1f}%)")
+        print(f"\nOverall Sentiment:")
+        print(f"   Positive: {pos} ({pos/len(all_collected_items)*100:.1f}%)")
+        print(f"   Negative: {neg} ({neg/len(all_collected_items)*100:.1f}%)")
+        print(f"   Neutral: {neu} ({neu/len(all_collected_items)*100:.1f}%)")
         
-        print(f"\n✨ Your dashboard now has MUCH richer sentiment data!")
+        print(f"\nYour dashboard now has MUCH richer sentiment data!")
         print(f"   Comments often reveal more nuanced opinions than posts!\n")
     else:
-        print("\n⚠️  No items collected.\n")
+        print("\n[WARNING] No items collected.\n")
 
 if __name__ == "__main__":
-    print("\n🚀 Enhanced Historical Backfill - Posts + Comments")
-    print("\n⚠️  Important Notes:")
+    print("\nEnhanced Historical Backfill - Posts + Comments")
+    print("\n[WARNING] Important Notes:")
     print("   - This collects BOTH posts and their top comments")
     print("   - Takes 3-5x longer than post-only collection")
     print("   - Provides much richer sentiment analysis")
@@ -226,9 +226,10 @@ if __name__ == "__main__":
         start = time.time()
         backfill_with_comments(comments_per_post)
         elapsed = (time.time() - start) / 60
-        print(f"⏱️  Total time: {elapsed:.1f} minutes")
+        print(f"Total time: {elapsed:.1f} minutes")
     else:
         print("Cancelled.")
+
 
 
 
