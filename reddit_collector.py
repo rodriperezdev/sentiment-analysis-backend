@@ -1,5 +1,5 @@
 import praw
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 import os
 from sentiment_analyzer import ArgentineSentimentAnalyzer
@@ -138,7 +138,7 @@ class RedditCollector:
                 'author': str(submission.author),
                 'score': submission.score,
                 'num_comments': submission.num_comments,
-                'created_utc': datetime.fromtimestamp(submission.created_utc).isoformat(),
+                'created_utc': datetime.fromtimestamp(submission.created_utc, tz=timezone.utc).isoformat(),
                 'url': submission.url,
                 'sentiment': sentiment['sentiment'],
                 'sentiment_score': sentiment['score'],
@@ -203,7 +203,7 @@ class RedditCollector:
                 'text': comment.body,
                 'author': str(comment.author),
                 'score': comment.score,
-                'created_utc': datetime.fromtimestamp(comment.created_utc).isoformat(),
+                'created_utc': datetime.fromtimestamp(comment.created_utc, tz=timezone.utc).isoformat(),
                 'sentiment': sentiment['sentiment'],
                 'sentiment_score': sentiment['score'],
                 'topics': topics,

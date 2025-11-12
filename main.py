@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from contextlib import asynccontextmanager
@@ -96,7 +96,7 @@ def run_historical_backfill():
                             'author': str(submission.author),
                             'score': submission.score,
                             'num_comments': submission.num_comments,
-                            'created_utc': datetime.fromtimestamp(submission.created_utc).isoformat(),
+                            'created_utc': datetime.fromtimestamp(submission.created_utc, tz=timezone.utc).isoformat(),
                             'url': submission.url,
                             'sentiment': sentiment['sentiment'],
                             'sentiment_score': sentiment['score'],
