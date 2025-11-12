@@ -236,8 +236,10 @@ async def lifespan(app: FastAPI):
     print("✓ Database initialized")
     print("✓ Scheduler started")
     
-    # Check if we need to run historical backfill (non-blocking)
-    check_and_start_backfill()
+    # Check if we need to run historical backfill (fully non-blocking)
+    # Run the check itself in a background thread to avoid blocking startup
+    threading.Thread(target=check_and_start_backfill, daemon=True).start()
+    print("✓ Backfill check started in background")
     
     yield
     
