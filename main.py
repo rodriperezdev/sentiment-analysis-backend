@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 import uvicorn
 import threading
 import time
-import signal
 
 from database import get_db, Post, DailySummary, Topic, init_db, save_posts, SessionLocal
 from sentiment_analyzer import ArgentineSentimentAnalyzer
@@ -71,22 +70,16 @@ def run_historical_backfill():
                     checked = 0
                     collected = 0
                     
-                    # Add timeout protection for the iterator
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError(f"Reddit API request timed out for r/{subreddit}")
+                    # Add simple time-based timeout (no signals needed)
+                    start_time = time.time()
+                    max_time_per_subreddit = 300  # 5 minutes max per subreddit
                     
-                    # Set a timeout for the entire subreddit collection (5 minutes max)
                     try:
-                        # Only use signal on Unix-like systems (Render supports it)
-                        timeout_set = False
-                        if hasattr(signal, 'SIGALRM'):
-                            signal.signal(signal.SIGALRM, timeout_handler)
-                            signal.alarm(300)  # 5 minutes timeout
-                            timeout_set = True
-                        else:
-                            print(f"    [WARNING] Timeout protection not available on this system")
-                        
                         for submission in reddit_sub.top(time_filter=time_filter, limit=limit):
+                            # Check if we've exceeded time limit
+                            if time.time() - start_time > max_time_per_subreddit:
+                                print(f"    [TIMEOUT] Time limit reached for r/{subreddit}, moving on...")
+                                break
                             checked += 1
                             
                             if submission.id in post_ids:
@@ -130,28 +123,17 @@ def run_historical_backfill():
                             
                             # Small delay to respect rate limits
                             time.sleep(0.3)
+                        
+                        print(f"  [OK] r/{subreddit}: {collected} posts")
                     
-                    finally:
-                        # Cancel the alarm
-                        if hasattr(signal, 'SIGALRM'):
-                            signal.alarm(0)
-                    
-                    print(f"  [OK] r/{subreddit}: {collected} posts")
+                    except Exception as inner_e:
+                        print(f"  [ERROR] Error processing r/{subreddit}: {str(inner_e)[:100]}")
                     
                     # Longer delay between subreddits
                     time.sleep(2)
                     
-                except TimeoutError:
-                    print(f"  [TIMEOUT] r/{subreddit} took too long, skipping...")
-                    # Cancel alarm and continue
-                    if hasattr(signal, 'SIGALRM'):
-                        signal.alarm(0)
-                    continue
                 except Exception as e:
                     print(f"  [ERROR] Error with r/{subreddit}: {str(e)[:100]}")
-                    # Cancel alarm if set
-                    if hasattr(signal, 'SIGALRM'):
-                        signal.alarm(0)
                     continue
         
         # Save all collected items to database
