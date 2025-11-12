@@ -41,7 +41,7 @@ def run_historical_backfill():
     
     try:
         backfill_status["in_progress"] = True
-        backfill_status["started_at"] = datetime.now().isoformat()
+        backfill_status["started_at"] = datetime.now(timezone.utc).isoformat()
         print("\n" + "="*60)
         print("STARTING HISTORICAL BACKFILL (Background)")
         print("="*60)
@@ -143,7 +143,7 @@ def run_historical_backfill():
             
             backfill_status["posts_collected"] = len(all_collected_items)
             backfill_status["completed"] = True
-            backfill_status["completed_at"] = datetime.now().isoformat()
+            backfill_status["completed_at"] = datetime.now(timezone.utc).isoformat()
             
             # Calculate date range
             dates = [datetime.fromisoformat(item['created_utc']) for item in all_collected_items]
@@ -324,7 +324,7 @@ def read_root():
 @app.get("/sentiment/trend", response_model=List[SentimentData])
 def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
     """Get sentiment trends for the last N days"""
-    end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(days=days)
     
     summaries = db.query(DailySummary).filter(
@@ -415,13 +415,13 @@ def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
 @app.get("/sentiment/current")
 def get_current_sentiment(db: Session = Depends(get_db)):
     """Get current sentiment snapshot (last 24 hours)"""
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
     
     posts = db.query(Post).filter(Post.created_utc >= yesterday).all()
     
     if not posts:
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "sentiment": {
                 "positive": 0.0,
                 "negative": 0.0,
@@ -437,7 +437,7 @@ def get_current_sentiment(db: Session = Depends(get_db)):
     neutral = sum(1 for p in posts if p.sentiment == 'neutral')
     
     return {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "sentiment": {
             "positive": positive / total,
             "negative": negative / total,
@@ -451,7 +451,7 @@ def get_current_sentiment(db: Session = Depends(get_db)):
 @app.get("/topics/trending", response_model=List[TopicData])
 def get_trending_topics(limit: int = 10, days: int = 7, db: Session = Depends(get_db)):
     """Get trending political topics"""
-    start_date = datetime.now() - timedelta(days=days)
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
     
     # Query topics from the last N days
     topics = db.query(
@@ -597,7 +597,7 @@ def trigger_collection():
                 "status": "warning",
                 "message": "No new political posts found",
                 "posts_collected": 0,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         
         # Save posts to database
@@ -607,7 +607,7 @@ def trigger_collection():
             "status": "success",
             "message": f"Successfully collected and stored {len(posts)} new posts",
             "posts_collected": len(posts),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "subreddits_checked": ["argentina", "RepublicaArgentina", "ArgentinaPolitica"]
         }
     
@@ -661,7 +661,7 @@ def clear_database():
                 "daily_summaries": summary_count,
                 "topics": topic_count
             },
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     except Exception as e:
