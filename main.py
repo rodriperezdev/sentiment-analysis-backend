@@ -50,11 +50,11 @@ def run_historical_backfill():
         
         all_collected_items = []
         
-        # Collect from multiple time periods
+        # Collect from multiple time periods (matching proven localhost script)
         time_periods = [
-            ('month', 100, 'Past month'),
-            ('year', 150, 'Past year'),
-            ('all', 100, 'All time top posts')
+            ('month', 150, 'Top posts from the past month'),
+            ('year', 200, 'Top posts from the past year'),
+            ('all', 150, 'Top posts of all time')
         ]
         
         for time_filter, limit, description in time_periods:
@@ -117,12 +117,54 @@ def run_historical_backfill():
                             post_ids.add(submission.id)
                             collected += 1
                             
+                            # Collect top 3 comments from this post for richer data
+                            try:
+                                submission.comments.replace_more(limit=0)
+                                top_comments = sorted(
+                                    submission.comments.list(),
+                                    key=lambda c: c.score,
+                                    reverse=True
+                                )[:3]  # Top 3 comments per post
+                                
+                                for comment in top_comments:
+                                    if not hasattr(comment, 'body') or len(comment.body) < 20:
+                                        continue
+                                    
+                                    # Check if comment is also political (keeps quality high)
+                                    comment_lower = comment.body.lower()
+                                    comment_matches = sum(1 for kw in collector.political_keywords if kw in comment_lower)
+                                    
+                                    # Only analyze if comment is political OR post has 2+ matches (context)
+                                    if comment_matches >= 1 or matches >= 2:
+                                        comment_sentiment = analyzer.analyze(comment.body)
+                                        comment_topics = analyzer.extract_topics(comment.body)
+                                        
+                                        comment_data = {
+                                            'id': f"{submission.id}_{comment.id}",
+                                            'subreddit': subreddit,
+                                            'title': f"Comment on: {submission.title[:50]}...",
+                                            'text': comment.body,
+                                            'author': str(comment.author),
+                                            'score': comment.score,
+                                            'num_comments': 0,
+                                            'created_utc': datetime.fromtimestamp(comment.created_utc, tz=timezone.utc).isoformat(),
+                                            'url': f"https://reddit.com{comment.permalink}",
+                                            'sentiment': comment_sentiment['sentiment'],
+                                            'sentiment_score': comment_sentiment['score'],
+                                            'topics': comment_topics,
+                                            'source': 'reddit_comment'
+                                        }
+                                        
+                                        all_collected_items.append(comment_data)
+                            except Exception:
+                                pass  # Skip comment collection errors, continue with posts
+                            
                             # Progress update
                             if collected % 25 == 0:
                                 print(f"    ✓ {collected} posts collected (checked {checked})...")
                             
                             # Small delay to respect rate limits
-                            time.sleep(0.3)
+                            time.sleep(0.5)  # Increased delay for comment collection
                         
                         print(f"  [OK] r/{subreddit}: {collected} posts")
                     
@@ -138,7 +180,11 @@ def run_historical_backfill():
         
         # Save all collected items to database
         if all_collected_items:
-            print(f"\n\nSaving {len(all_collected_items)} posts to database...")
+            # Count posts vs comments
+            posts_count = sum(1 for item in all_collected_items if item['source'] == 'reddit')
+            comments_count = sum(1 for item in all_collected_items if item['source'] == 'reddit_comment')
+            
+            print(f"\n\nSaving {len(all_collected_items)} items to database...")
             save_posts(all_collected_items)
             
             backfill_status["posts_collected"] = len(all_collected_items)
@@ -153,7 +199,9 @@ def run_historical_backfill():
             print("\n" + "="*60)
             print("HISTORICAL BACKFILL COMPLETE!")
             print("="*60)
-            print(f"[OK] Total posts collected: {len(all_collected_items)}")
+            print(f"[OK] Posts collected: {posts_count}")
+            print(f"[OK] Comments collected: {comments_count}")
+            print(f"[OK] Total items: {len(all_collected_items)}")
             print(f"[OK] Date range: {oldest.strftime('%Y-%m-%d')} to {newest.strftime('%Y-%m-%d')}")
             print(f"[OK] Span: {(newest - oldest).days} days")
             print("="*60 + "\n")
