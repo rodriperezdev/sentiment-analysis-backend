@@ -227,7 +227,7 @@ def check_and_start_backfill():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
-    # Startup
+    # Startup - Keep it minimal for fast deployment
     init_db()
     
     global scheduler
@@ -235,11 +235,8 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     print("✓ Database initialized")
     print("✓ Scheduler started")
-    
-    # Check if we need to run historical backfill (fully non-blocking)
-    # Run the check itself in a background thread to avoid blocking startup
-    threading.Thread(target=check_and_start_backfill, daemon=True).start()
-    print("✓ Backfill check started in background")
+    print("✓ API ready!")
+    print("ℹ️  Use POST /trigger-backfill to manually start historical data collection")
     
     yield
     
@@ -311,13 +308,14 @@ def read_root():
             "GET /stats": "Get overall statistics",
             "GET /status": "Get API status and backfill progress",
             "POST /collect/refresh": "Trigger manual data collection from Reddit",
-            "POST /clear-database": "[TEMPORARY] Clear all data and restart backfill"
+            "POST /trigger-backfill": "Manually start historical data backfill",
+            "POST /clear-database": "[TEMPORARY] Clear all data and reset"
         },
         "data_sources": ["r/argentina", "r/RepublicaArgentina", "r/ArgentinaPolitica"],
         "features": [
-            "Automatic historical data backfill on first deployment",
+            "Manual historical data backfill via /trigger-backfill",
             "Real-time data collection every 2 hours",
-            "VADER sentiment analysis",
+            "VADER sentiment analysis optimized for Argentine Spanish",
             "Topic extraction and trending analysis"
         ],
         "github": "https://github.com/rodriperezdev/sentiment-analysis-backend"
@@ -616,6 +614,47 @@ def trigger_collection():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during collection: {str(e)}")
 
+@app.post("/trigger-backfill")
+def trigger_backfill():
+    """
+    Manually trigger historical data backfill.
+    Use this after deployment to populate the database with historical posts.
+    """
+    global backfill_status
+    
+    # Check if backfill is already running
+    if backfill_status["in_progress"]:
+        return {
+            "status": "already_running",
+            "message": "Backfill is already in progress",
+            "started_at": backfill_status["started_at"],
+            "posts_collected": backfill_status["posts_collected"]
+        }
+    
+    # Check if backfill was already completed
+    if backfill_status["completed"] and not backfill_status["error"]:
+        db = SessionLocal()
+        try:
+            total_posts = db.query(func.count(Post.id)).scalar()
+            if total_posts >= 200:
+                return {
+                    "status": "already_completed",
+                    "message": "Historical data already exists",
+                    "total_posts": total_posts,
+                    "completed_at": backfill_status["completed_at"]
+                }
+        finally:
+            db.close()
+    
+    # Start backfill in background
+    threading.Thread(target=check_and_start_backfill, daemon=True).start()
+    
+    return {
+        "status": "started",
+        "message": "Historical backfill started in background. Check /status for progress.",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.post("/clear-database")
 def clear_database():
     """
@@ -641,7 +680,7 @@ def clear_database():
         print(f"   Deleted {summary_count} daily summaries")
         print(f"   Deleted {topic_count} topics\n")
         
-        # Reset backfill status to trigger new backfill
+        # Reset backfill status
         global backfill_status
         backfill_status = {
             "in_progress": False,
@@ -652,12 +691,9 @@ def clear_database():
             "error": None
         }
         
-        # Trigger new backfill in background
-        check_and_start_backfill()
-        
         return {
             "status": "success",
-            "message": "Database cleared successfully. Backfill will start automatically.",
+            "message": "Database cleared successfully. Use POST /trigger-backfill to start data collection.",
             "deleted": {
                 "posts": post_count,
                 "daily_summaries": summary_count,
