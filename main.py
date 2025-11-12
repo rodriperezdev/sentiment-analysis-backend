@@ -54,6 +54,7 @@ app.add_middleware(
         "http://localhost:3000",  # Local development
         "http://localhost:3001",  # Alternative local port
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # ✅ ADD THIS LINE
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allows all headers
