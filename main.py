@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from contextlib import asynccontextmanager
 import uvicorn
+import threading
+import time
 
-from database import get_db, Post, DailySummary, Topic, init_db, save_posts
+from database import get_db, Post, DailySummary, Topic, init_db, save_posts, SessionLocal
 from sentiment_analyzer import ArgentineSentimentAnalyzer
 from scheduler import DataCollectionScheduler
 from reddit_collector import RedditCollector
@@ -19,6 +21,184 @@ collector = RedditCollector()
 
 # Initialize scheduler (will run in background)
 scheduler = None
+
+# Track if backfill is in progress
+backfill_status = {
+    "in_progress": False,
+    "completed": False,
+    "posts_collected": 0,
+    "started_at": None,
+    "completed_at": None,
+    "error": None
+}
+
+def run_historical_backfill():
+    """
+    Run historical data backfill in background thread.
+    This populates the database with historical posts without blocking startup.
+    """
+    global backfill_status
+    
+    try:
+        backfill_status["in_progress"] = True
+        backfill_status["started_at"] = datetime.now().isoformat()
+        print("\n" + "="*60)
+        print("STARTING HISTORICAL BACKFILL (Background)")
+        print("="*60)
+        print("This will collect historical political posts from Reddit...")
+        print("The API is ready to use while this runs in the background.\n")
+        
+        all_collected_items = []
+        
+        # Collect from multiple time periods
+        time_periods = [
+            ('month', 100, 'Past month'),
+            ('year', 150, 'Past year'),
+            ('all', 100, 'All time top posts')
+        ]
+        
+        for time_filter, limit, description in time_periods:
+            print(f"\nCollecting: {description}")
+            print("-" * 60)
+            
+            for subreddit in collector.subreddits:
+                try:
+                    print(f"  r/{subreddit} ({time_filter})...")
+                    
+                    reddit_sub = collector.reddit.subreddit(subreddit)
+                    post_ids = set()
+                    checked = 0
+                    collected = 0
+                    
+                    for submission in reddit_sub.top(time_filter=time_filter, limit=limit):
+                        checked += 1
+                        
+                        if submission.id in post_ids:
+                            continue
+                        
+                        # Filter for political content
+                        full_text = f"{submission.title} {submission.selftext}".lower()
+                        matches = sum(1 for keyword in collector.political_keywords if keyword in full_text)
+                        
+                        if matches < 1:
+                            continue
+                        
+                        # Analyze the post
+                        full_text = f"{submission.title} {submission.selftext}"
+                        sentiment = analyzer.analyze(full_text)
+                        topics = analyzer.extract_topics(full_text)
+                        
+                        post_data = {
+                            'id': submission.id,
+                            'subreddit': subreddit,
+                            'title': submission.title,
+                            'text': submission.selftext,
+                            'author': str(submission.author),
+                            'score': submission.score,
+                            'num_comments': submission.num_comments,
+                            'created_utc': datetime.fromtimestamp(submission.created_utc).isoformat(),
+                            'url': submission.url,
+                            'sentiment': sentiment['sentiment'],
+                            'sentiment_score': sentiment['score'],
+                            'topics': topics,
+                            'source': 'reddit'
+                        }
+                        
+                        all_collected_items.append(post_data)
+                        post_ids.add(submission.id)
+                        collected += 1
+                        
+                        # Progress update
+                        if collected % 25 == 0:
+                            print(f"    ✓ {collected} posts collected (checked {checked})...")
+                        
+                        # Small delay to respect rate limits
+                        time.sleep(0.3)
+                    
+                    print(f"  [OK] r/{subreddit}: {collected} posts")
+                    
+                    # Longer delay between subreddits
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    print(f"  [ERROR] Error with r/{subreddit}: {e}")
+                    continue
+        
+        # Save all collected items to database
+        if all_collected_items:
+            print(f"\n\nSaving {len(all_collected_items)} posts to database...")
+            save_posts(all_collected_items)
+            
+            backfill_status["posts_collected"] = len(all_collected_items)
+            backfill_status["completed"] = True
+            backfill_status["completed_at"] = datetime.now().isoformat()
+            
+            # Calculate date range
+            dates = [datetime.fromisoformat(item['created_utc']) for item in all_collected_items]
+            oldest = min(dates)
+            newest = max(dates)
+            
+            print("\n" + "="*60)
+            print("HISTORICAL BACKFILL COMPLETE!")
+            print("="*60)
+            print(f"[OK] Total posts collected: {len(all_collected_items)}")
+            print(f"[OK] Date range: {oldest.strftime('%Y-%m-%d')} to {newest.strftime('%Y-%m-%d')}")
+            print(f"[OK] Span: {(newest - oldest).days} days")
+            print("="*60 + "\n")
+        else:
+            print("\n[WARNING] No posts collected during backfill.\n")
+            backfill_status["completed"] = True
+            backfill_status["error"] = "No posts collected"
+        
+    except Exception as e:
+        print(f"\n[ERROR] Backfill failed: {e}\n")
+        backfill_status["error"] = str(e)
+        backfill_status["completed"] = True
+    
+    finally:
+        backfill_status["in_progress"] = False
+
+def check_and_start_backfill():
+    """
+    Check if historical data exists, and start backfill if needed.
+    This runs in a background thread to avoid blocking deployment.
+    """
+    db = SessionLocal()
+    
+    try:
+        # Check if we have enough historical data
+        total_posts = db.query(func.count(Post.id)).scalar()
+        
+        # Check date range
+        if total_posts > 0:
+            oldest_post = db.query(Post).order_by(Post.created_utc.asc()).first()
+            newest_post = db.query(Post).order_by(Post.created_utc.desc()).first()
+            days_span = (newest_post.created_utc - oldest_post.created_utc).days
+            
+            print(f"\n[INFO] Current database status:")
+            print(f"   Total posts: {total_posts}")
+            print(f"   Date range: {oldest_post.created_utc.strftime('%Y-%m-%d')} to {newest_post.created_utc.strftime('%Y-%m-%d')}")
+            print(f"   Span: {days_span} days\n")
+            
+            # If we have good data (more than 200 posts and spanning at least 30 days), skip backfill
+            if total_posts >= 200 and days_span >= 30:
+                print("[OK] Historical data already exists. Skipping backfill.\n")
+                backfill_status["completed"] = True
+                return
+        
+        print(f"[INFO] Limited historical data found ({total_posts} posts).")
+        print("[INFO] Starting background backfill to populate historical data...")
+        print("[INFO] This will run in the background without blocking the API.\n")
+        
+        # Start backfill in a separate thread
+        backfill_thread = threading.Thread(target=run_historical_backfill, daemon=True)
+        backfill_thread.start()
+        
+    except Exception as e:
+        print(f"[ERROR] Error checking database: {e}")
+    
+    finally:
+        db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +211,9 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     print("✓ Database initialized")
     print("✓ Scheduler started")
+    
+    # Check if we need to run historical backfill (non-blocking)
+    check_and_start_backfill()
     
     yield
     
@@ -54,7 +237,7 @@ app.add_middleware(
         "http://localhost:3000",  # Local development
         "http://localhost:3001",  # Alternative local port
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",  # ✅ ADD THIS LINE
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allows all headers
@@ -100,10 +283,17 @@ def read_root():
             "GET /posts/recent": "Get recent analyzed posts",
             "POST /analyze/text": "Manually analyze any text",
             "GET /stats": "Get overall statistics",
+            "GET /status": "Get API status and backfill progress",
             "POST /collect/refresh": "Trigger manual data collection from Reddit"
         },
         "data_sources": ["r/argentina", "r/RepublicaArgentina", "r/ArgentinaPolitica"],
-        "github": "Link to your repo"
+        "features": [
+            "Automatic historical data backfill on first deployment",
+            "Real-time data collection every 2 hours",
+            "VADER sentiment analysis",
+            "Topic extraction and trending analysis"
+        ],
+        "github": "https://github.com/rodriperezdev/sentiment-analysis-backend"
     }
 
 @app.get("/sentiment/trend", response_model=List[SentimentData])
@@ -333,6 +523,37 @@ def get_overall_stats(db: Session = Depends(get_db)):
         "avg_daily_posts": round(avg_daily_posts, 1),
         "top_topics": [{"topic": t.name, "mentions": int(t.total)} for t in top_topics],
         "data_collection": "Active - updates every 2 hours"
+    }
+
+@app.get("/status")
+def get_status(db: Session = Depends(get_db)):
+    """Get API and backfill status"""
+    total_posts = db.query(func.count(Post.id)).scalar()
+    
+    # Get date range if data exists
+    date_range = None
+    if total_posts > 0:
+        oldest_post = db.query(Post).order_by(Post.created_utc.asc()).first()
+        newest_post = db.query(Post).order_by(Post.created_utc.desc()).first()
+        date_range = {
+            "oldest": oldest_post.created_utc.isoformat(),
+            "newest": newest_post.created_utc.isoformat(),
+            "days_span": (newest_post.created_utc - oldest_post.created_utc).days
+        }
+    
+    return {
+        "api_status": "online",
+        "total_posts": total_posts,
+        "date_range": date_range,
+        "backfill": {
+            "in_progress": backfill_status["in_progress"],
+            "completed": backfill_status["completed"],
+            "posts_collected": backfill_status["posts_collected"],
+            "started_at": backfill_status["started_at"],
+            "completed_at": backfill_status["completed_at"],
+            "error": backfill_status["error"]
+        },
+        "scheduler_active": scheduler is not None and scheduler.scheduler.running if scheduler else False
     }
 
 @app.post("/collect/refresh")
