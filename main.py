@@ -193,8 +193,10 @@ def check_and_start_backfill():
             print(f"   Span: {days_span} days\n")
             
             # Check for invalid future dates (data corruption)
+            # Database stores timezone-naive UTC datetimes, so add timezone info for comparison
             now = datetime.now(timezone.utc)
-            if newest_post.created_utc > now + timedelta(days=1):
+            newest_post_utc = newest_post.created_utc.replace(tzinfo=timezone.utc) if newest_post.created_utc.tzinfo is None else newest_post.created_utc
+            if newest_post_utc > now + timedelta(days=1):
                 print(f"\n[WARNING] Database contains future dates!")
                 print(f"[WARNING] Newest post date: {newest_post.created_utc.strftime('%Y-%m-%d')}")
                 print(f"[WARNING] Current date: {now.strftime('%Y-%m-%d')}")
@@ -324,7 +326,8 @@ def read_root():
 @app.get("/sentiment/trend", response_model=List[SentimentData])
 def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
     """Get sentiment trends for the last N days"""
-    end_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Use timezone-naive UTC for comparison with database timestamps
+    end_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(days=days)
     
     summaries = db.query(DailySummary).filter(
@@ -415,7 +418,8 @@ def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
 @app.get("/sentiment/current")
 def get_current_sentiment(db: Session = Depends(get_db)):
     """Get current sentiment snapshot (last 24 hours)"""
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    # Use timezone-naive UTC for comparison with database timestamps
+    yesterday = datetime.utcnow() - timedelta(days=1)
     
     posts = db.query(Post).filter(Post.created_utc >= yesterday).all()
     
@@ -451,7 +455,8 @@ def get_current_sentiment(db: Session = Depends(get_db)):
 @app.get("/topics/trending", response_model=List[TopicData])
 def get_trending_topics(limit: int = 10, days: int = 7, db: Session = Depends(get_db)):
     """Get trending political topics"""
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    # Use timezone-naive UTC for comparison with database timestamps
+    start_date = datetime.utcnow() - timedelta(days=days)
     
     # Query topics from the last N days
     topics = db.query(

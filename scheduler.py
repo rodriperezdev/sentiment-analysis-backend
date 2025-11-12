@@ -40,7 +40,8 @@ class DataCollectionScheduler:
         """Generate daily sentiment summary"""
         try:
             db = SessionLocal()
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Use UTC to match database timestamps
+            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             yesterday = today - timedelta(days=1)
             
             # Check if summary already exists
@@ -109,7 +110,8 @@ class DataCollectionScheduler:
         """Update topic mention counts and sentiment"""
         try:
             db = SessionLocal()
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Use UTC to match database timestamps
+            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             
             # Get today's posts
             posts = db.query(Post).filter(
