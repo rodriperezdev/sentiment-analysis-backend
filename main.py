@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 import threading
 import time
+import signal
 
 from database import get_db, Post, DailySummary, Topic, init_db, save_posts, SessionLocal
 from sentiment_analyzer import ArgentineSentimentAnalyzer
@@ -70,58 +71,87 @@ def run_historical_backfill():
                     checked = 0
                     collected = 0
                     
-                    for submission in reddit_sub.top(time_filter=time_filter, limit=limit):
-                        checked += 1
+                    # Add timeout protection for the iterator
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError(f"Reddit API request timed out for r/{subreddit}")
+                    
+                    # Set a timeout for the entire subreddit collection (5 minutes max)
+                    try:
+                        # Only use signal on Unix-like systems (Render supports it)
+                        timeout_set = False
+                        if hasattr(signal, 'SIGALRM'):
+                            signal.signal(signal.SIGALRM, timeout_handler)
+                            signal.alarm(300)  # 5 minutes timeout
+                            timeout_set = True
+                        else:
+                            print(f"    [WARNING] Timeout protection not available on this system")
                         
-                        if submission.id in post_ids:
-                            continue
-                        
-                        # Filter for political content
-                        full_text = f"{submission.title} {submission.selftext}".lower()
-                        matches = sum(1 for keyword in collector.political_keywords if keyword in full_text)
-                        
-                        if matches < 1:
-                            continue
-                        
-                        # Analyze the post
-                        full_text = f"{submission.title} {submission.selftext}"
-                        sentiment = analyzer.analyze(full_text)
-                        topics = analyzer.extract_topics(full_text)
-                        
-                        post_data = {
-                            'id': submission.id,
-                            'subreddit': subreddit,
-                            'title': submission.title,
-                            'text': submission.selftext,
-                            'author': str(submission.author),
-                            'score': submission.score,
-                            'num_comments': submission.num_comments,
-                            'created_utc': datetime.fromtimestamp(submission.created_utc, tz=timezone.utc).isoformat(),
-                            'url': submission.url,
-                            'sentiment': sentiment['sentiment'],
-                            'sentiment_score': sentiment['score'],
-                            'topics': topics,
-                            'source': 'reddit'
-                        }
-                        
-                        all_collected_items.append(post_data)
-                        post_ids.add(submission.id)
-                        collected += 1
-                        
-                        # Progress update
-                        if collected % 25 == 0:
-                            print(f"    ✓ {collected} posts collected (checked {checked})...")
-                        
-                        # Small delay to respect rate limits
-                        time.sleep(0.3)
+                        for submission in reddit_sub.top(time_filter=time_filter, limit=limit):
+                            checked += 1
+                            
+                            if submission.id in post_ids:
+                                continue
+                            
+                            # Filter for political content
+                            full_text = f"{submission.title} {submission.selftext}".lower()
+                            matches = sum(1 for keyword in collector.political_keywords if keyword in full_text)
+                            
+                            if matches < 1:
+                                continue
+                            
+                            # Analyze the post
+                            full_text = f"{submission.title} {submission.selftext}"
+                            sentiment = analyzer.analyze(full_text)
+                            topics = analyzer.extract_topics(full_text)
+                            
+                            post_data = {
+                                'id': submission.id,
+                                'subreddit': subreddit,
+                                'title': submission.title,
+                                'text': submission.selftext,
+                                'author': str(submission.author),
+                                'score': submission.score,
+                                'num_comments': submission.num_comments,
+                                'created_utc': datetime.fromtimestamp(submission.created_utc, tz=timezone.utc).isoformat(),
+                                'url': submission.url,
+                                'sentiment': sentiment['sentiment'],
+                                'sentiment_score': sentiment['score'],
+                                'topics': topics,
+                                'source': 'reddit'
+                            }
+                            
+                            all_collected_items.append(post_data)
+                            post_ids.add(submission.id)
+                            collected += 1
+                            
+                            # Progress update
+                            if collected % 25 == 0:
+                                print(f"    ✓ {collected} posts collected (checked {checked})...")
+                            
+                            # Small delay to respect rate limits
+                            time.sleep(0.3)
+                    
+                    finally:
+                        # Cancel the alarm
+                        if hasattr(signal, 'SIGALRM'):
+                            signal.alarm(0)
                     
                     print(f"  [OK] r/{subreddit}: {collected} posts")
                     
                     # Longer delay between subreddits
                     time.sleep(2)
                     
+                except TimeoutError:
+                    print(f"  [TIMEOUT] r/{subreddit} took too long, skipping...")
+                    # Cancel alarm and continue
+                    if hasattr(signal, 'SIGALRM'):
+                        signal.alarm(0)
+                    continue
                 except Exception as e:
-                    print(f"  [ERROR] Error with r/{subreddit}: {e}")
+                    print(f"  [ERROR] Error with r/{subreddit}: {str(e)[:100]}")
+                    # Cancel alarm if set
+                    if hasattr(signal, 'SIGALRM'):
+                        signal.alarm(0)
                     continue
         
         # Save all collected items to database
@@ -179,6 +209,18 @@ def check_and_start_backfill():
             print(f"   Total posts: {total_posts}")
             print(f"   Date range: {oldest_post.created_utc.strftime('%Y-%m-%d')} to {newest_post.created_utc.strftime('%Y-%m-%d')}")
             print(f"   Span: {days_span} days\n")
+            
+            # Check for invalid future dates (data corruption)
+            now = datetime.now(timezone.utc)
+            if newest_post.created_utc > now + timedelta(days=1):
+                print(f"\n[WARNING] Database contains future dates!")
+                print(f"[WARNING] Newest post date: {newest_post.created_utc.strftime('%Y-%m-%d')}")
+                print(f"[WARNING] Current date: {now.strftime('%Y-%m-%d')}")
+                print(f"[WARNING] This indicates a timezone/date parsing issue.")
+                print(f"[WARNING] Please call POST /clear-database to reset and re-collect.\n")
+                backfill_status["error"] = "Database contains invalid future dates"
+                backfill_status["completed"] = True
+                return
             
             # If we have good data (more than 200 posts and spanning at least 30 days), skip backfill
             if total_posts >= 200 and days_span >= 30:
@@ -284,7 +326,8 @@ def read_root():
             "POST /analyze/text": "Manually analyze any text",
             "GET /stats": "Get overall statistics",
             "GET /status": "Get API status and backfill progress",
-            "POST /collect/refresh": "Trigger manual data collection from Reddit"
+            "POST /collect/refresh": "Trigger manual data collection from Reddit",
+            "POST /clear-database": "[TEMPORARY] Clear all data and restart backfill"
         },
         "data_sources": ["r/argentina", "r/RepublicaArgentina", "r/ArgentinaPolitica"],
         "features": [
@@ -588,6 +631,62 @@ def trigger_collection():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during collection: {str(e)}")
+
+@app.post("/clear-database")
+def clear_database():
+    """
+    TEMPORARY ENDPOINT: Clear all data from database to allow fresh backfill.
+    Remove this endpoint after fixing the database.
+    """
+    try:
+        db = SessionLocal()
+        
+        # Get stats before clearing
+        post_count = db.query(func.count(Post.id)).scalar()
+        summary_count = db.query(func.count(DailySummary.id)).scalar()
+        topic_count = db.query(func.count(Topic.id)).scalar()
+        
+        # Clear all tables
+        db.query(Post).delete()
+        db.query(DailySummary).delete()
+        db.query(Topic).delete()
+        db.commit()
+        
+        print("\n[INFO] Database cleared successfully")
+        print(f"   Deleted {post_count} posts")
+        print(f"   Deleted {summary_count} daily summaries")
+        print(f"   Deleted {topic_count} topics\n")
+        
+        # Reset backfill status to trigger new backfill
+        global backfill_status
+        backfill_status = {
+            "in_progress": False,
+            "completed": False,
+            "posts_collected": 0,
+            "started_at": None,
+            "completed_at": None,
+            "error": None
+        }
+        
+        # Trigger new backfill in background
+        check_and_start_backfill()
+        
+        return {
+            "status": "success",
+            "message": "Database cleared successfully. Backfill will start automatically.",
+            "deleted": {
+                "posts": post_count,
+                "daily_summaries": summary_count,
+                "topics": topic_count
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
