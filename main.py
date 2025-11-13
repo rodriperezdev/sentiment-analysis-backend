@@ -419,8 +419,7 @@ def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
             daily_data[day_key]['total'] += 1
         
         # Filter out days with too few posts (reduces noise)
-        min_posts_threshold = 5 if days <= 30 else 10  # Higher threshold for longer periods
-        daily_data = {k: v for k, v in daily_data.items() if v['total'] >= min_posts_threshold}
+        min_posts_threshold = 0
         
         # Convert to response format
         result = []
