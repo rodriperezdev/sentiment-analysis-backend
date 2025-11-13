@@ -130,32 +130,28 @@ def run_historical_backfill():
                                     if not hasattr(comment, 'body') or len(comment.body) < 20:
                                         continue
                                     
-                                    # Check if comment is also political (keeps quality high)
-                                    comment_lower = comment.body.lower()
-                                    comment_matches = sum(1 for kw in collector.political_keywords if kw in comment_lower)
+                                    # Since the post is already political, collect all top comments
+                                    # This ensures we get rich contextual data
+                                    comment_sentiment = analyzer.analyze(comment.body)
+                                    comment_topics = analyzer.extract_topics(comment.body)
                                     
-                                    # Only analyze if comment is political OR post has 2+ matches (context)
-                                    if comment_matches >= 1 or matches >= 2:
-                                        comment_sentiment = analyzer.analyze(comment.body)
-                                        comment_topics = analyzer.extract_topics(comment.body)
-                                        
-                                        comment_data = {
-                                            'id': f"{submission.id}_{comment.id}",
-                                            'subreddit': subreddit,
-                                            'title': f"Comment on: {submission.title[:50]}...",
-                                            'text': comment.body,
-                                            'author': str(comment.author),
-                                            'score': comment.score,
-                                            'num_comments': 0,
-                                            'created_utc': datetime.fromtimestamp(comment.created_utc, tz=timezone.utc).isoformat(),
-                                            'url': f"https://reddit.com{comment.permalink}",
-                                            'sentiment': comment_sentiment['sentiment'],
-                                            'sentiment_score': comment_sentiment['score'],
-                                            'topics': comment_topics,
-                                            'source': 'reddit_comment'
-                                        }
-                                        
-                                        all_collected_items.append(comment_data)
+                                    comment_data = {
+                                        'id': f"{submission.id}_{comment.id}",
+                                        'subreddit': subreddit,
+                                        'title': f"Comment on: {submission.title[:50]}...",
+                                        'text': comment.body,
+                                        'author': str(comment.author),
+                                        'score': comment.score,
+                                        'num_comments': 0,
+                                        'created_utc': datetime.fromtimestamp(comment.created_utc, tz=timezone.utc).isoformat(),
+                                        'url': f"https://reddit.com{comment.permalink}",
+                                        'sentiment': comment_sentiment['sentiment'],
+                                        'sentiment_score': comment_sentiment['score'],
+                                        'topics': comment_topics,
+                                        'source': 'reddit_comment'
+                                    }
+                                    
+                                    all_collected_items.append(comment_data)
                             except Exception:
                                 pass  # Skip comment collection errors, continue with posts
                             
