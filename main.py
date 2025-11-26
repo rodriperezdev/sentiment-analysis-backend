@@ -369,6 +369,10 @@ def read_root():
         "github": "https://github.com/rodriperezdev/sentiment-analysis-backend"
     }
 
+@app.head("/")
+def read_root_head():
+    return {}
+
 @app.get("/sentiment/trend", response_model=List[SentimentData])
 def get_sentiment_trend(days: int = 7, db: Session = Depends(get_db)):
     """Get sentiment trends for the last N days"""
